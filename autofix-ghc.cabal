@@ -22,7 +22,7 @@ executable autofix-ghc
                      , base                 >= 4.7    &&  < 5.0
                      , filepath
                      , lifted-base          >= 0.2.3.6
-                     , optparse-applicative >= 0.11   &&  < 0.12
+                     , optparse-applicative >= 0.11   &&  < 0.13
                      , process-extras
                      , regex-base           >= 0.93.2
                      , regex-tdfa           >= 1.2.1
