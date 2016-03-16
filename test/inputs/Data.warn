@@ -1,0 +1,6 @@
+output/Data.hs:22:1: Warning:
+    The import of ‘when’ from module ‘Control.Monad’ is redundant
+
+output/Data.hs:24:1: Warning:
+    The import of ‘Object, object, .=, .:?, .:’
+    from module ‘Data.Aeson’ is redundant

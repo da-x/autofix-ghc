@@ -158,7 +158,7 @@ type FirstLine = Int
 type Changes = [(FirstLine, Count, [Text])]
 
 -- | Take a file (splitted to lines), a problem description, and return the
--- changes that need to happen in the filein order to fix the problem.
+-- changes that need to happen in the file in order to fix the problem.
 --
 -- Each change tells the zero-based index of the place to modify, how many
 -- lines to remove from there, and the new lines to put in.
