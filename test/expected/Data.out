@@ -2,12 +2,17 @@ autofix-ghc can fix: output/Data.hs
 diff -urN output/Data.hs output/Data.hs
 --- output/Data.hs
 +++ output/Data.hs
-@@ -19,7 +19,7 @@
+@@ -19,11 +19,9 @@
  import           Control.Concurrent
  import Control.Exception (throw)
  import qualified Control.Monad.Catch as E
 -import           Control.Monad                (forM, when)
 +import           Control.Monad                (forM)
  import           Control.Monad.Trans.Reader   (ReaderT (..))
- import           Data.Aeson                   (FromJSON (parseJSON),
-                                                ToJSON (toJSON), Value (String, Object, Array, Number),
+-import           Data.Aeson                   (FromJSON (parseJSON),
+-                                               ToJSON (toJSON), Value (String, Object, Array, Number),
+-                                               object, (.:), (.:?), (.=))
++import           Data.Aeson                   (FromJSON(parseJSON), ToJSON(toJSON), Value(String, Array, Number))
+ import           Data.Scientific              (floatingOrInteger)
+ import           Data.Hashable
+ import qualified Data.HashTable.IO            as H

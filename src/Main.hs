@@ -21,7 +21,6 @@ import           Text.Regex.TDFA.Text       ()
 import qualified Options.Applicative        as O
 import           Options.Applicative        ((<>), (<**>))
 ----
-import           Parser                     (linesParser)
 import           Process                    (readProcess'')
 import           Text                       (lineSplit)
 ------------------------------------------------------------------------------------
@@ -96,7 +95,7 @@ data ImpKind = Op | Reg
 data Imp = Imp
     { impKind    :: ImpKind
     , impText    :: Text
-    , impConstrs :: (Maybe Text)
+    , impConstrs :: Maybe [Text]
     } deriving Show
 
 importGenerator :: Import -> Text
@@ -106,19 +105,20 @@ importGenerator (Import ws1 modname ws2 implist) =
           part (Imp Reg t c) = T.concat [t, constToText c]
           part (Imp Op t c) = T.concat ["(", t, ")", constToText c]
           constToText Nothing = ""
-          constToText (Just x) = T.concat ["(", x, ")"]
+          constToText (Just xs) = T.concat ["(", T.concat (intersperse ", " xs), ")"]
 
 importParser :: P.Parser Import
 importParser = Import <$> (P.string "import" *> takespace1) <*> modName
                 <*> takespace <*> importParts
-    where importParts = P.string "(" *> (part `P.sepBy` (P.string ",")) <* P.string ")"
-          part        = skipspace *> P.choice [
+    where importParts = P.string "(" *> (part `P.sepBy` (skipspace *> P.string "," <* skipspace)) <* P.string ")"
+          part        = P.choice [
                              Imp <$> (P.string "(" *> (pure Op)) <*> (P.takeWhile ops <* P.string ")")
                                                 <*> constructors' <* skipspace
                            , Imp <$> (pure Reg) <*> idName <*> constructors' <* skipspace
                         ]
           constructors' = skipspace *> P.option Nothing constructors
-          constructors  = P.string "(" *> skipspace *> (Just <$> idName) <* skipspace <* P.string ")"
+          constructors  = Just <$> (P.string "(" *>
+                                    (idName `P.sepBy` (skipspace *> P.string "," <* skipspace)) <* P.string ")")
           takespace     = P.takeWhile space
           takespace1    = P.takeWhile1 space
           skipspace     = P.skipMany (P.satisfy space)
@@ -127,6 +127,8 @@ importParser = Import <$> (P.string "import" *> takespace1) <*> modName
           space '\t'    = True
           space _       = False
           ops   '.'     = True
+          ops   ':'     = True
+          ops   '='     = True
           ops   '*'     = True
           ops   '/'     = True
           ops   '<'     = True
@@ -155,7 +157,7 @@ importParser = Import <$> (P.string "import" *> takespace1) <*> modName
 
 type Count = Int
 type FirstLine = Int
-type Changes = [(FirstLine, Count, [Text])]
+type Changes = Either String [(FirstLine, Count, [Text])]
 
 -- | Take a file (splitted to lines), a problem description, and return the
 -- changes that need to happen in the file in order to fix the problem.
@@ -165,23 +167,25 @@ type Changes = [(FirstLine, Count, [Text])]
 fixProblem :: [Text] -> DescInt -> Changes
 fixProblem t di = fixImportProblem di
     where fixImportProblem (DescInt linenum (RedundantPart removals _)) =
-              case linesParser importParser (drop linenum t) of
-                   Right (nrlines, P.Done _ imp) ->
-                       [(linenum, nrlines, [T.concat
-                            [importGenerator (filterImp removals imp), "\n"]])]
-                   _ -> err
-          fixImportProblem _      = err
+              case P.parse importParser $ T.concat $ drop linenum t of
+                   P.Done notConsumed imp ->
+                       Right [(linenum, 1 + (length t - linenum)
+                                        - length (lineSplit notConsumed), [T.concat
+                              [importGenerator (filterImp removals imp), "\n"]])]
+                   v -> Left $ "parse error: " ++ show v
+          fixImportProblem v      = Left $ "unhandled problem: " ++ show v
 
-          err                     = [] -- [(linenum'', 0, [T.concat ["-- ", T.pack $ show d', "\n"]])]
-          filterImp  removals imp = imp { impList = filter filterPart (impList imp) }
+          filterImp  removals imp = imp { impList = map eachPart $ filter (filterName . impText) (impList imp)}
               where
-                  filterPart part = not ((impText part) `elem` removalList)
-                  removalList     = filter (/= "") $ T.splitOn " " $ T.map
-                                      (\case '\n' -> ' '; ',' -> ' '; x -> x) removals
+                  eachPart impc   = impc { impConstrs = fmap (filter filterName) (impConstrs impc) }
+                  filterName name = not (name `elem` removalList)
+                  removalList     = filter (/= "") $ T.splitOn ", " $ T.map
+                                      (\case '\n' -> ' '; x -> x) removals
 
 data Opts = Opts {
       optDiff        :: Bool
     , optFix         :: Bool
+    , optVerbose     :: Bool
     } deriving (Show)
 
 optsParse :: O.Parser Opts
@@ -194,6 +198,10 @@ optsParse = Opts
          ( O.long "fix"
         <> O.short 'f'
         <> O.help "Whether to fix in-place" )
+     <*> O.switch
+         ( O.long "verbose"
+        <> O.short 'v'
+        <> O.help "Enable verbosity" )
 
 main :: IO ()
 main = do
@@ -206,23 +214,30 @@ main = do
             $ groupBy (\(Problem a _) (Problem b _) -> a == b)
             $ sort allProblems
 
+    when optVerbose $
+        forM_ allSortedProblems print
+
     withSystemTempDirectory "autofix-ghc" $ \tempDir -> do
         forM_ allSortedProblems $ \(filename, descints') -> do
             content' <- fmap lineSplit $ T.readFile $ T.unpack filename
             let fixOne content [] = return content
                 fixOne content (x:xs) = do
-                    let changes = fixProblem content x
-                    let moddesc linenum diff (DescInt linenum' desc)
-                           | linenum' >= linenum = DescInt (linenum' + diff) desc
-                           | otherwise           = DescInt linenum' desc
+                    case fixProblem content x of
+                        Left str -> do
+                            when optVerbose $ putStrLn str
+                            fixOne content xs
+                        Right changes -> do
+                            let moddesc linenum diff (DescInt linenum' desc)
+                                   | linenum' >= linenum = DescInt (linenum' + diff) desc
+                                   | otherwise           = DescInt linenum' desc
 
-                    (mcontent, xs') <- flip (flip foldM (content, xs)) changes $
-                        \(content'', xs') (pos, count, newContent)-> do
-                            return $ ((take pos content'') ++
-                                      newContent ++ (drop (pos + count) content''),
-                                      map (moddesc pos (length newContent - count)) xs')
+                            (mcontent, xs') <- flip (flip foldM (content, xs)) changes $
+                                \(content'', xs') (pos, count, newContent)-> do
+                                    return $ ((take pos content'') ++
+                                              newContent ++ (drop (pos + count) content''),
+                                              map (moddesc pos (length newContent - count)) xs')
 
-                    fixOne mcontent xs'
+                            fixOne mcontent xs'
 
             modifiedLines <- fixOne content' descints'
             let tempfile = tempDir </> "f"

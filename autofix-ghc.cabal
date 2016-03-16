@@ -41,7 +41,6 @@ executable autofix-ghc
   hs-source-dirs:    src/
   main-is:           Main.hs
   ghc-options:       -Wall -O2
-  other-modules:     Parser
   build-depends:       ansi-terminal        >= 0.6.2.3
                      , autofix-ghc
                      , attoparsec           >= 0.12.1.6
